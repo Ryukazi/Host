@@ -1,66 +1,71 @@
-const express = require("express");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+import express from "express";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import axios from "axios";
+import https from "https";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Create uploads folder if not exists
+// Ensure uploads folder exists
 if (!fs.existsSync("./uploads")) fs.mkdirSync("./uploads");
 
-// Multer storage setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "./uploads"),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    let prefix = "file";
+// Multer setup for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-    if (file.mimetype.startsWith("image")) prefix = "image";
-    else if (file.mimetype.startsWith("video")) prefix = "video";
-    else if (file.mimetype.startsWith("audio")) prefix = "audio";
+// Helper to get file extension by MIME type
+function getExtension(mimetype) {
+  if (!mimetype) return ".bin";
+  if (mimetype.startsWith("image/")) return ".png";
+  if (mimetype.startsWith("video/")) return ".mp4";
+  if (mimetype.startsWith("audio/")) return ".mp3";
+  return ".bin";
+}
 
-    const uniqueName = `${prefix}_${Date.now()}${ext}`;
-    cb(null, uniqueName);
-  },
-});
+// POST /upload → for website or bot to upload media
+app.post("/upload", upload.single("file"), async (req, res) => {
+  try {
+    let buffer, ext;
 
-// Allowed media types
-const fileFilter = (req, file, cb) => {
-  const allowed = [
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/gif",
-    "video/mp4",
-    "video/webm",
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/ogg"
-  ];
-  if (allowed.includes(file.mimetype)) cb(null, true);
-  else cb(new Error("File type not supported!"));
-};
+    if (req.file) {
+      // File uploaded directly
+      buffer = req.file.buffer;
+      ext = getExtension(req.file.mimetype);
+    } else if (req.query.url) {
+      // URL download
+      const response = await axios.get(req.query.url, {
+        responseType: "arraybuffer",
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        headers: { "User-Agent": "Mozilla/5.0" },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      });
+      buffer = Buffer.from(response.data);
+      ext = getExtension(response.headers["content-type"]);
+    } else {
+      return res.status(400).json({ status: false, message: "No file or URL provided" });
+    }
 
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 500 * 1024 * 1024 } // 500MB max
+    const fileName = `${Date.now()}${ext}`;
+    const filePath = path.join("uploads", fileName);
+    fs.writeFileSync(filePath, buffer);
+
+    const hostedUrl = `${req.protocol}://${req.get("host")}/uploads/${fileName}`;
+    res.json({ status: true, file: fileName, url: hostedUrl });
+
+  } catch (err) {
+    console.error("❌ Upload Error:", err);
+    res.status(500).json({ status: false, message: "Failed to upload file" });
+  }
 });
 
 // Serve uploaded files
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static("uploads"));
 
-// POST /upload endpoint
-app.post("/upload", upload.single("media"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
-  const fileLink = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-  res.json({ link: fileLink });
-});
-
-// Simple GET test
-app.get("/", (req, res) => res.send("Media host is live!"));
+// Home route
+app.get("/", (req, res) => res.send("Media Host API Running ✔️"));
 
 // Start server
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
