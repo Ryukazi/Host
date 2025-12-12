@@ -1,0 +1,16 @@
+{
+  "name": "media-host-api",
+  "version": "1.0.0",
+  "description": "Host images, audio, and video online and get a direct link",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["media", "host", "upload", "api"],
+  "author": "Denish",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
