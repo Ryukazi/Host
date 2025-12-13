@@ -1,11 +1,9 @@
 import express from "express";
-import axios from "axios";
+import OpenAI from "openai";
 
 const app = express();
 
-const GROQ_API_URL = "https://api.groq.com/v1/generate";
-
-// All Groq API keys
+// All your Groq keys
 const GROQ_KEYS = [
   "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",
   "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",
@@ -19,45 +17,52 @@ function getRandomKey() {
   return GROQ_KEYS[Math.floor(Math.random() * GROQ_KEYS.length)];
 }
 
-// GET endpoint: /api/zoro?message=your+message
+// Store conversation history per user
+const conversationHistory = new Map();
+
+// GET endpoint: /api/zoro?user=USER_ID&message=Your+message
 app.get("/api/zoro", async (req, res) => {
-  const message = req.query.message;
-  if (!message) return res.status(400).json({ error: "Message query parameter required" });
+  const { user, message } = req.query;
+  if (!user || !message) return res.status(400).json({ error: "Both 'user' and 'message' are required" });
+
+  const conversationKey = user;
 
   try {
-    const response = await axios.post(
-      GROQ_API_URL,
-      {
-        model: "groq-llm-large",
-        input: `You are Roronoa Zoro from One Piece. Always reply in-character: stoic, serious, sword-focused, sometimes humorous. User says: "${message}"\nZoro:`,
-        max_output_tokens: 150,
-        temperature: 0.6,
-        top_p: 0.8
-      },
-      {
-        headers: {
-          "Authorization": `Bearer ${getRandomKey()}`,
-          "Content-Type": "application/json"
-        },
-        timeout: 30000
-      }
-    );
-
-    // Fix: check both output_text and choices array
-    let reply = "Zoro is silent...";
-    if (response.data) {
-      if (response.data.output_text && response.data.output_text.trim().length > 0) {
-        reply = response.data.output_text.trim();
-      } else if (response.data.choices && response.data.choices[0]?.text) {
-        reply = response.data.choices[0].text.trim();
-      }
+    // Initialize conversation if it doesn't exist
+    if (!conversationHistory.has(conversationKey)) {
+      conversationHistory.set(conversationKey, [
+        { role: "system", content: "You are Roronoa Zoro from One Piece. Speak stoic, serious, sword-focused, sometimes humorous." }
+      ]);
     }
+
+    const history = conversationHistory.get(conversationKey);
+    history.push({ role: "user", content: message });
+
+    // Create OpenAI-compatible Groq client
+    const client = new OpenAI({
+      apiKey: getRandomKey(),
+      baseURL: "https://api.groq.com/openai/v1"
+    });
+
+    // Send request
+    const response = await client.responses.create({
+      model: "openai/gpt-oss-20b",
+      messages: history,
+      temperature: 0.6,
+      max_output_tokens: 150,
+      top_p: 0.8
+    });
+
+    const reply = response.output_text || "Zoro is silent...";
+
+    history.push({ role: "assistant", content: reply });
+    if (history.length > 10) history.splice(1, history.length - 10);
 
     res.json({ reply });
 
-  } catch (error) {
-    console.error("Groq API error:", error.response?.data || error.message || error);
-    res.status(500).json({ error: "LLM request failed", details: error.response?.data || error.message });
+  } catch (err) {
+    console.error("Groq API error:", err.response?.data || err.message || err);
+    res.status(500).json({ error: "LLM request failed", details: err.response?.data || err.message });
   }
 });
 
