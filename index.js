@@ -3,7 +3,7 @@ import OpenAI from "openai";
 
 const app = express();
 
-// All your Groq keys
+// All Groq API keys
 const GROQ_KEYS = [
   "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",
   "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",
@@ -17,46 +17,55 @@ function getRandomKey() {
   return GROQ_KEYS[Math.floor(Math.random() * GROQ_KEYS.length)];
 }
 
-// Store conversation history per user
+// Conversation memory
 const conversationHistory = new Map();
 
-// GET endpoint: /api/zoro?user=USER_ID&message=Your+message
+// GET endpoint
 app.get("/api/zoro", async (req, res) => {
   const { user, message } = req.query;
-  if (!user || !message) return res.status(400).json({ error: "Both 'user' and 'message' are required" });
+  if (!message) return res.status(400).json({ error: "Message query parameter required" });
 
-  const conversationKey = user;
+  const uid = user || "anonymous"; // fallback if user not provided
+  const conversationKey = uid;
 
   try {
-    // Initialize conversation if it doesn't exist
+    // Initialize history if missing
     if (!conversationHistory.has(conversationKey)) {
-      conversationHistory.set(conversationKey, [
-        { role: "system", content: "You are Roronoa Zoro from One Piece. Speak stoic, serious, sword-focused, sometimes humorous." }
-      ]);
+      conversationHistory.set(conversationKey, []);
     }
 
     const history = conversationHistory.get(conversationKey);
-    history.push({ role: "user", content: message });
 
-    // Create OpenAI-compatible Groq client
+    // Build prompt
+    let prompt = "You are Roronoa Zoro from One Piece. Speak in-character: stoic, serious, sword-focused, sometimes humorous.\n";
+    if (history.length > 0) {
+      history.forEach((msg, i) => {
+        prompt += i % 2 === 0 ? `User: ${msg}\n` : `Zoro: ${msg}\n`;
+      });
+    }
+    prompt += `User: ${message}\nZoro:`;
+
+    // Create client
     const client = new OpenAI({
       apiKey: getRandomKey(),
       baseURL: "https://api.groq.com/openai/v1"
     });
 
-    // Send request
+    // Send request (use input as string)
     const response = await client.responses.create({
       model: "openai/gpt-oss-20b",
-      messages: history,
+      input: prompt,
       temperature: 0.6,
       max_output_tokens: 150,
       top_p: 0.8
     });
 
-    const reply = response.output_text || "Zoro is silent...";
+    const reply = response.output_text?.trim() || "Zoro is silent...";
 
-    history.push({ role: "assistant", content: reply });
-    if (history.length > 10) history.splice(1, history.length - 10);
+    // Save history
+    history.push(message);
+    history.push(reply);
+    if (history.length > 10) history.splice(0, history.length - 10);
 
     res.json({ reply });
 
